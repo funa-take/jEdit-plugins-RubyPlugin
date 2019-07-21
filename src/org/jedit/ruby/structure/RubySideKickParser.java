@@ -35,6 +35,8 @@ import org.jedit.ruby.completion.RubyCompletion;
 import org.jedit.ruby.completion.CodeAnalyzer;
 import errorlist.DefaultErrorSource;
 import errorlist.ErrorSource;
+import org.jruby.Ruby;
+import org.jruby.common.*;
 
 import javax.swing.tree.DefaultMutableTreeNode;
 
@@ -153,7 +155,7 @@ public final class RubySideKickParser extends SideKickParser {
     }
 
     private void addToErrorList(int type, ISourcePosition position, DefaultErrorSource errorSource, String message) {
-        int line = position == null ? 0 : position.getEndLine();
+        int line = position == null ? 0 : position.getLine();
         String file = position == null ? null : position.getFile();
 
         int startOffset = RubyPlugin.getStartOffset(line);
@@ -194,22 +196,56 @@ public final class RubySideKickParser extends SideKickParser {
         public boolean isVerbose() {
             return false;
         }
+        
+        @Override
+        public Ruby getRuntime() {
+          return Ruby.getGlobalRuntime();
+        }
 
-        public final void warn(ISourcePosition position, String message) {
+        // @Override
+        // public final void warn(String message) {
+          // addWarning(message, null, errorSource);
+        // }
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, ISourcePosition position, String message) {
             addWarning(message, position, errorSource);
         }
-
-        public final void warn(String message) {
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, String fileName, int lineNumber, String message) {
             addWarning(message, null, errorSource);
         }
-
-        public final void warning(ISourcePosition position, String message) {
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, String fileName, String message) {
+            addWarning(message, null, errorSource);
+        }
+        @Override
+        public final void warn(IRubyWarnings.ID id, String message) {
+            addWarning(message, null, errorSource);
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, String message) {
+            addWarning(message, null, errorSource);
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, String fileName, int lineNumber, String message) {
+            addWarning(message, null, errorSource);
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, ISourcePosition position, String message) {
             addWarning(message, position, errorSource);
         }
-
-        public final void warning(String message) {
-            addWarning(message, null, errorSource);
-        }
+        
+        // @Override
+        // public final void warning(String message) {
+            // addWarning(message, null, errorSource);
+        // }
+        
 
         public final void error(ISourcePosition position, String message) {
             addError(message, position, errorSource);
