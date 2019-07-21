@@ -1,29 +1,29 @@
 /*
- * RubyNodeVisitor.java - 
- *
- * Copyright 2005 Robert McKinnon
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
- */
+* RubyNodeVisitor.java - 
+*
+* Copyright 2005 Robert McKinnon
+*
+* This program is free software; you can redistribute it and/or
+* modify it under the terms of the GNU General Public License
+* as published by the Free Software Foundation; either version 2
+* of the License, or any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, write to the Free Software
+* Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+*/
 package org.jedit.ruby.parser;
 
-import org.jruby.ast.visitor.AbstractVisitor;
+import org.jruby.ast.visitor.AbstractNodeVisitor;
 import org.jruby.ast.*;
 import org.jruby.lexer.yacc.SyntaxException;
 import org.jruby.lexer.yacc.ISourcePosition;
-import org.jruby.evaluator.Instruction;
+// import org.jruby.evaluator.Instruction;
 import org.jedit.ruby.ast.*;
 import org.jedit.ruby.RubyPlugin;
 
@@ -31,557 +31,633 @@ import java.util.List;
 import java.util.LinkedList;
 import java.util.ArrayList;
 import java.util.Iterator;
-
+import org.gjt.sp.jedit.*;
 /**
  * @author robmckinnon at users.sourceforge.net
  */
-final class RubyNodeVisitor extends AbstractVisitor {
-
-    private static final String CLASS = "class";
-    private static final String MODULE = "module";
-
-    private final List<String> namespaceNames;
-    private final List<String> compositeNamespaceNames;
-    private final LinkedList<Member> currentMember;
-    private int methodIndex;
-
-    private final List<Member> methods;
-    private final List<RubyParser.WarningListener> problemListeners;
-    private final LineCounter lineCounter;
-    private final NameVisitor nameVisitor;
-    private MethodCallWithSelfAsAnImplicitReceiver methodCall;
-    private boolean inIfNode;
-    private boolean underModuleNode;
-    private Root root;
-
-    public RubyNodeVisitor(LineCounter lineCounts, List<Member> methodMembers, List<RubyParser.WarningListener> listeners) {
-        inIfNode = false;
-        underModuleNode = false;
-        lineCounter = lineCounts;
-        namespaceNames = new ArrayList<String>();
-        compositeNamespaceNames = new ArrayList<String>();
-        currentMember = new LinkedList<Member>();
-        root = new Root(RubyPlugin.getEndOfFileOffset());
-        currentMember.add(root);
-        nameVisitor = new NameVisitor();
-        problemListeners = listeners;
-        methods = methodMembers;
-        methodCall = null;
-        methodIndex = 0;
+final class RubyNodeVisitor<T> extends AbstractNodeVisitor<T> {
+  
+  private static final String CLASS = "class";
+  private static final String MODULE = "module";
+  
+  private final List<String> namespaceNames;
+  private final List<String> compositeNamespaceNames;
+  private final LinkedList<Member> currentMember;
+  private int methodIndex;
+  
+  private final List<Member> methods;
+  private final List<RubyParser.WarningListener> problemListeners;
+  private final LineCounter lineCounter;
+  private final NameVisitor nameVisitor;
+  private MethodCallWithSelfAsAnImplicitReceiver methodCall;
+  private boolean inIfNode;
+  private boolean underModuleNode;
+  private Root root;
+  
+  public RubyNodeVisitor(LineCounter lineCounts, List<Member> methodMembers, List<RubyParser.WarningListener> listeners) {
+    inIfNode = false;
+    underModuleNode = false;
+    lineCounter = lineCounts;
+    namespaceNames = new ArrayList<String>();
+    compositeNamespaceNames = new ArrayList<String>();
+    currentMember = new LinkedList<Member>();
+    root = new Root(RubyPlugin.getEndOfFileOffset());
+    currentMember.add(root);
+    nameVisitor = new NameVisitor();
+    problemListeners = listeners;
+    methods = methodMembers;
+    methodCall = null;
+    methodIndex = 0;
+  }
+  
+  public final List<Member> getMembers() {
+    return currentMember.getFirst().getChildMembersAsList();
+  }
+  
+  @Override
+  public T defaultVisit(Node node) {    
+    List list = node.childNodes();
+    Iterator<Node> it = list.iterator();
+    while(it.hasNext()) {
+      it.next().accept(this);
+      // System.out.println(it.next());
     }
-
-    public final List<Member> getMembers() {
-        return currentMember.getFirst().getChildMembersAsList();
+    
+    return null;
+  }
+  
+  protected final T visitNode(Node node) {
+    if (printNode()) {
+      String name = node.getClass().getName();
+      int index = name.lastIndexOf('.');
+      ISourcePosition position = node.getPosition();
+      if (position != null) {
+        System.out.println("Line " + position.getLine() +"-"+ RubyParser.getEndLine(position) +
+          ": " + getStartOffset(position) + "-" + getEndOffset(position) +
+          " " + name.substring(index + 1));
+      } else {
+        System.out.print("          Node: " + name.substring(index + 1));
+      }
     }
-
-    protected final Instruction visitNode(Node node) {
-        if (printNode()) {
-            String name = node.getClass().getName();
-            int index = name.lastIndexOf('.');
-            ISourcePosition position = node.getPosition();
-            if (position != null) {
-                System.out.println("Line " + position.getStartLine() +"-"+ position.getEndLine() +
-                        ": " + position.getStartOffset() + "-" + position.getEndOffset() +
-                        " " + name.substring(index + 1));
-            } else {
-                System.out.print("          Node: " + name.substring(index + 1));
-            }
-        }
-        return null;
-    }
-
-    private static boolean printNode() {
-//        return !(node instanceof NewlineNode);
-        return false;
-    }
-
-    private void visitNodeIterator(Iterator iterator) {
-        while (iterator.hasNext()) {
-            Node node = (Node) iterator.next();
-            visitNode(node);
-            if (printNode()) {
-                RubyPlugin.log("", getClass());
-            }
-            node.accept(this);
-        }
-    }
-
-    public final Instruction visitBlockNode(BlockNode node) {
-        visitNode(node);
+    return null;
+  }
+  
+  private static boolean printNode() {
+    // return !(node instanceof NewlineNode);
+    return false;
+  }
+  
+  private void visitNodeIterator(Iterator iterator) {
+    while (iterator.hasNext()) {
+      Node node = (Node) iterator.next();
+      visitNode(node);
+      if (printNode()) {
         RubyPlugin.log("", getClass());
-        visitNodeIterator(node.childNodes().iterator());
-        return null;
+      }
+      node.accept(this);
     }
-
-    public final Instruction visitNewlineNode(NewlineNode node) {
-        visitNode(node);
-        node.getNextNode().accept(this);
-        return null;
+  }
+  
+  @Override
+  public final T visitBlockNode(BlockNode node) {
+    visitNode(node);
+    RubyPlugin.log("", getClass());
+    visitNodeIterator(node.childNodes().iterator());
+    return null;
+  }
+  
+  @Override
+  public final T visitNewlineNode(NewlineNode node) {
+    visitNode(node);
+    node.getNextNode().accept(this);
+    return null;
+  }
+  
+  @Override
+  public final T visitModuleNode(ModuleNode module) {
+    //        System.out.print("[");
+    addParentNode(MODULE, module, module, module.getBodyNode());
+    //        System.out.print("]");
+    return null;
+  }
+  
+  @Override
+  public T visitSClassNode(SClassNode selfClassNode) {
+    selfClassNode.getBodyNode().accept(this);
+    return null;
+  }
+  
+  @Override
+  public final T visitClassNode(ClassNode classNode) {
+    boolean tempUnderModuleNode = underModuleNode;
+    underModuleNode = false;
+    Member member = addParentNode(CLASS, classNode, classNode, classNode.getBodyNode());
+    Node superNode = classNode.getSuperNode();
+    
+    if (superNode != null) {
+      superNode.accept(nameVisitor);
+      StringBuffer name = new StringBuffer();
+      List<String> namespaces = nameVisitor.namespaces;
+      for (String namespace : namespaces) {
+        name.append(namespace).append("::");
+      }
+      nameVisitor.namespaces.clear();
+      name.append(nameVisitor.name);
+      ((ClassMember)member).setSuperClassName(name.toString());
     }
-
-    public final Instruction visitModuleNode(ModuleNode module) {
-//        System.out.print("[");
-        addParentNode(MODULE, module, module, module.getBodyNode());
-//        System.out.print("]");
-        return null;
+    
+    underModuleNode = tempUnderModuleNode;
+    return null;
+  }
+  
+  private Member addParentNode(String memberType, Node node, IScopingNode scopeNode, Node bodyNode) {
+    visitNode(node);
+    scopeNode.getCPath().accept(nameVisitor);
+    String name = nameVisitor.name;
+    
+    Member member;
+    if (memberType == MODULE) {
+      member = new Module(name);
+    } else {
+      member = new ClassMember(name);
     }
-
-    public Instruction visitSClassNode(SClassNode selfClassNode) {
-        selfClassNode.getBodyNode().accept(this);
-        return null;
+    
+    member = populateOffsets(member, scopeNode.getCPath().getPosition(), node.getPosition(), memberType);
+    
+    int colonNameCount = nameVisitor.namespaces.size();
+    List<String> namespaces = nameVisitor.namespaces;
+    for (String namespace : namespaces) {
+      compositeNamespaceNames.add(namespace);
+      namespaceNames.add(namespace);
     }
-
-    public final Instruction visitClassNode(ClassNode classNode) {
-        boolean tempUnderModuleNode = underModuleNode;
-        underModuleNode = false;
-        Member member = addParentNode(CLASS, classNode, classNode, classNode.getBodyNode());
-        Node superNode = classNode.getSuperNode();
-
-        if (superNode != null) {
-            superNode.accept(nameVisitor);
-            StringBuffer name = new StringBuffer();
-            for (String namespace : nameVisitor.namespaces) {
-                name.append(namespace).append("::");
-            }
-            nameVisitor.namespaces.clear();
-            name.append(nameVisitor.name);
-            ((ClassMember)member).setSuperClassName(name.toString());
+    nameVisitor.namespaces.clear();
+    populateNamespace(member);
+    compositeNamespaceNames.clear();
+    
+    namespaceNames.add(name);
+    Member parent = currentMember.getLast();
+    parent.addChildMember(member);
+    currentMember.add(member);
+    
+    if (memberType == MODULE) {
+      underModuleNode = true;
+    }
+    tranverseChildren(bodyNode, node);
+    if (memberType == MODULE) {
+      underModuleNode = false;
+    }
+    
+    namespaceNames.remove(name);
+    while (colonNameCount > 0) {
+      namespaceNames.remove(namespaceNames.size() - 1);
+      colonNameCount--;
+    }
+    currentMember.removeLast();
+    return member;
+  }
+  
+  private void tranverseChildren(Node bodyNode, Node node) {
+    if (bodyNode == null) {
+      if (node.childNodes() != null) {
+        for (Object child : node.childNodes()) {
+          if (child instanceof ArgumentNode) {
+            // do nothing
+          } else if (child instanceof Node) {
+            Node childNode = (Node) (child);
+            childNode.accept(this);
+          }
         }
-
-        underModuleNode = tempUnderModuleNode;
-        return null;
+      }
+    } else {
+      bodyNode.accept(this);
     }
-
-    private Member addParentNode(String memberType, Node node, IScopingNode scopeNode, Node bodyNode) {
-        visitNode(node);
-        scopeNode.getCPath().accept(nameVisitor);
-        String name = nameVisitor.name;
-
-        Member member;
-        if (memberType == MODULE) {
-            member = new Module(name);
-        } else {
-            member = new ClassMember(name);
-        }
-
-        member = populateOffsets(member, scopeNode.getCPath().getPosition(), node.getPosition(), memberType);
-
-        int colonNameCount = nameVisitor.namespaces.size();
-        for (String namespace : nameVisitor.namespaces) {
-            compositeNamespaceNames.add(namespace);
-            namespaceNames.add(namespace);
-        }
-        nameVisitor.namespaces.clear();
-        populateNamespace(member);
-        compositeNamespaceNames.clear();
-
-        namespaceNames.add(name);
-        Member parent = currentMember.getLast();
-        parent.addChildMember(member);
-        currentMember.add(member);
-
-        if (memberType == MODULE) {
-            underModuleNode = true;
-        }
-        tranverseChildren(bodyNode, node);
-        if (memberType == MODULE) {
-            underModuleNode = false;
-        }
-
-        namespaceNames.remove(name);
-        while (colonNameCount > 0) {
-            namespaceNames.remove(namespaceNames.size() - 1);
-            colonNameCount--;
-        }
-        currentMember.removeLast();
-        return member;
+  }
+  
+  public T visitArgsCatNode(ArgsCatNode node) {
+    visitNode(node);
+    return null;
+  }
+  
+  public T visitArgsNode(ArgsNode node) {
+    visitNode(node);
+    //        node.accept(this);
+    return null;
+  }
+  
+  public final T visitDefnNode(DefnNode node) {
+    visitNode(node);
+    Member method;
+    try {
+      // method = getMember("def", methodIndex, methods, node.getName().to_s().asJavaString(), node.getNameNode().getPosition(), node.getPosition());
+      method = getMember("def", methodIndex, methods, node.getName().to_s().asJavaString(), node.getPosition(), node.getPosition());
+    } catch (IndexAdjustmentException e) {
+      methodIndex = e.getIndex();
+      method = getMethodNoCheckedException(methodIndex, methods, node.getName().to_s().asJavaString(), node.getPosition());
     }
-
-    private void tranverseChildren(Node bodyNode, Node node) {
-        if (bodyNode == null) {
-            if (node.childNodes() != null) {
-                for (Object child : node.childNodes()) {
-                    if (child instanceof ArgumentNode) {
-                        // do nothing
-                    } else if (child instanceof Node) {
-                        Node childNode = (Node) (child);
-                        childNode.accept(this);
-                    }
-                }
-            }
-        } else {
-            bodyNode.accept(this);
+    methodIndex++;
+    Member parent = currentMember.getLast();
+    parent.addChildMember(method);
+    return null;
+  }
+  
+  private Member getMethodNoCheckedException(int index, List<Member> members, String memberName, ISourcePosition position) {
+    try {
+      return getMember("def", index, members, memberName, position, position);
+    } catch (IndexAdjustmentException e) {
+      return throwCantFindException("def", memberName, position);
+    }
+  }
+  
+  public final T visitDefsNode(DefsNode node) {
+    visitNode(node);
+    
+    Method method = (Method)methods.get(methodIndex++);
+    populateReceiverName(method, node);
+    populateOffsets(method, node.getPosition(), node.getPosition(), "def");
+    
+    currentMember.getLast().addChildMember(method);
+    currentMember.add(method);
+    
+    tranverseChildren(node.getBodyNode(), node);
+    
+    currentMember.removeLast();
+    return null;
+  }
+  
+  private void populateReceiverName(Method method, DefsNode node) {
+    String methodName = node.getName().to_s().asJavaString();
+    Node receiverNode = node.getReceiverNode();
+    
+    if (receiverNode instanceof ConstNode) {
+      ConstNode constNode = (ConstNode)receiverNode;
+      method.setReceiver(constNode.getName().asJavaString(), methodName);
+    } else if (receiverNode instanceof SelfNode) {
+      method.setReceiverToSelf(methodName);
+    }
+    RubyPlugin.log(": " + method.getFullName(), getClass());
+  }
+  
+  private void populateNamespace(Member member) {
+    StringBuffer namespace = new StringBuffer();
+    if (namespaceNames.size() > 0) {
+      for (String name : namespaceNames) {
+        namespace.append(name).append("::");
+      }
+      member.setNamespace(namespace.toString());
+    }
+    if (compositeNamespaceNames.size() > 0) {
+      namespace = new StringBuffer();
+      for (String name : compositeNamespaceNames) {
+        namespace.append(name).append("::");
+      }
+      member.setCompositeNamespace(namespace.toString());
+    }
+  }
+  
+  private Member getMember(String memberType, int index, List<Member> members, String memberName, ISourcePosition startPosition, ISourcePosition endPosition) throws IndexAdjustmentException {
+    Member member;
+    try {
+      member = members.get(index);
+      String shortName = member.getShortName();
+      if (!memberName.equals(shortName)) {
+        index++;
+        while(index < members.size()) {
+          member = members.get(index);
+          if (memberName.equals(member.getShortName())) {
+            throw new IndexAdjustmentException(index);
+          } else {
+            index++;
+          }
         }
+        throw new Exception();
+      }
+    } catch (Exception e) {
+      if (e instanceof IndexAdjustmentException) {
+        throw (IndexAdjustmentException)e;
+      } else {
+        return throwCantFindException(memberType, memberName, endPosition);
+      }
     }
-
-    public Instruction visitArgsCatNode(ArgsCatNode node) {
-        visitNode(node);
-        return null;
+    return populateOffsets(member, startPosition, endPosition, memberType);
+  }
+  
+  private Member populateOffsets(Member member, ISourcePosition position, ISourcePosition endPosition, String memberType) {
+    member.setStartOffset(getStartOffset(position, member));
+    member.setEndOffset(getEndOffset(endPosition));
+    member.setStartOuterOffset(getOuterOffset(member, memberType+" "));
+    return member;
+  }
+  
+  private Member throwCantFindException(String memberType, String memberName, ISourcePosition position) {
+    String message = "parser can't find " + memberType + " " + memberName;
+    for (RubyParser.WarningListener listener : problemListeners) {
+      listener.error(position, message);
     }
-
-    public Instruction visitArgsNode(ArgsNode node) {
-        visitNode(node);
-//        node.accept(this);
-        return null;
+    throw new SyntaxException(null, "", position.getLine(), "", message);
+  }
+  
+  public T visitRootNode(RootNode node) {
+    visitNode(node);
+    RubyPlugin.log("",getClass());
+    if (node.getBodyNode() != null) {
+      node.getBodyNode().accept(this);
     }
-
-    public final Instruction visitDefnNode(DefnNode node) {
-        visitNode(node);
-        Member method;
-        try {
-            method = getMember("def", methodIndex, methods, node.getName(), node.getNameNode().getPosition(), node.getPosition());
-        } catch (IndexAdjustmentException e) {
-            methodIndex = e.getIndex();
-            method = getMethodNoCheckedException(methodIndex, methods, node.getName(), node.getPosition());
-        }
-        methodIndex++;
-        Member parent = currentMember.getLast();
-        parent.addChildMember(method);
-        return null;
+    return null;
+  }
+  
+  public final T visitIfNode(IfNode node) {
+    visitNode(node);
+    if (node.getThenBody() != null) {
+      inIfNode = true;
+      node.getThenBody().accept(this);
+      inIfNode = false;
     }
-
-    private Member getMethodNoCheckedException(int index, List<Member> members, String memberName, ISourcePosition position) {
-        try {
-            return getMember("def", index, members, memberName, position, position);
-        } catch (IndexAdjustmentException e) {
-            return throwCantFindException("def", memberName, position);
-        }
+    return null;
+  }
+  
+  public final T visitIterNode(IterNode node) {
+    visitNode(node);
+    RubyPlugin.log("", getClass());
+    if (node.getBodyNode() != null) {
+      node.getBodyNode().accept(this);
     }
-
-    public final Instruction visitDefsNode(DefsNode node) {
-        visitNode(node);
-
-        Method method = (Method)methods.get(methodIndex++);
-        populateReceiverName(method, node);
-        populateOffsets(method, node.getPosition(), node.getPosition(), "def");
-
-        currentMember.getLast().addChildMember(method);
-        currentMember.add(method);
-
-        tranverseChildren(node.getBodyNode(), node);
-
-        currentMember.removeLast();
-        return null;
+    return null;
+  }
+  
+  public T visitArrayNode(ArrayNode node) {
+    if (isMethodCall()) {
+      for (int i = 0; i < node.size(); i++) {
+        node.get(i).accept(this);
+      }   
     }
-
-    private void populateReceiverName(Method method, DefsNode node) {
-        String methodName = node.getName();
-        Node receiverNode = node.getReceiverNode();
-        
-        if (receiverNode instanceof ConstNode) {
-            ConstNode constNode = (ConstNode)receiverNode;
-            method.setReceiver(constNode.getName(), methodName);
-        } else if (receiverNode instanceof SelfNode) {
-            method.setReceiverToSelf(methodName);
-        }
-        RubyPlugin.log(": " + method.getFullName(), getClass());
+    return null;
+  }
+  
+  private boolean isMethodCall() {
+    return methodCall != null;
+  }
+  
+  public T visitConstNode(ConstNode node) {
+    if (isMethodCall()) {
+      methodCall.addArgument(node.getName().to_s().asJavaString());
     }
-
-    private void populateNamespace(Member member) {
-        StringBuffer namespace = new StringBuffer();
-        if (namespaceNames.size() > 0) {
-            for (String name : namespaceNames) {
-                namespace.append(name).append("::");
-            }
-            member.setNamespace(namespace.toString());
-        }
-        if (compositeNamespaceNames.size() > 0) {
-            namespace = new StringBuffer();
-            for (String name : compositeNamespaceNames) {
-                namespace.append(name).append("::");
-            }
-            member.setCompositeNamespace(namespace.toString());
-        }
+    return null;
+  }
+  
+  public T visitSymbolNode(SymbolNode node) {
+    if (isMethodCall()) {
+      methodCall.addArgument(":" + node.getName().to_s().asJavaString());
     }
-
-    private Member getMember(String memberType, int index, List<Member> members, String memberName, ISourcePosition startPosition, ISourcePosition endPosition) throws IndexAdjustmentException {
-        Member member;
-        try {
-            member = members.get(index);
-            String shortName = member.getShortName();
-            if (!memberName.equals(shortName)) {
-                index++;
-                while(index < members.size()) {
-                    member = members.get(index);
-                    if (memberName.equals(member.getShortName())) {
-                        throw new IndexAdjustmentException(index);
-                    } else {
-                        index++;
-                    }
-                }
-                throw new Exception();
-            }
-        } catch (Exception e) {
-            if (e instanceof IndexAdjustmentException) {
-                throw (IndexAdjustmentException)e;
-            } else {
-                return throwCantFindException(memberType, memberName, endPosition);
-            }
-        }
-        return populateOffsets(member, startPosition, endPosition, memberType);
+    return null;
+  }
+  
+  public T visitStrNode(StrNode node) {
+    if (isMethodCall()) {
+      methodCall.addArgument("'" + node.getValue().toString() + "'");
     }
-
-    private Member populateOffsets(Member member, ISourcePosition position, ISourcePosition endPosition, String memberType) {
-        member.setStartOffset(getStartOffset(position, member));
-        member.setEndOffset(getEndOffset(endPosition));
-        member.setStartOuterOffset(getOuterOffset(member, memberType+" "));
-        return member;
+    return null;
+  }
+  
+  public T visitHashNode(HashNode node) {
+    if (isMethodCall()) {
+      // node.getListNode().accept(this);
+      List list = node.childNodes();
+      Iterator<Node> it = list.iterator();
+      while(it.hasNext()) {
+        it.next().accept(this);
+        // System.out.println(it.next());
+      }
+      
     }
-
-    private Member throwCantFindException(String memberType, String memberName, ISourcePosition position) {
-        String message = "parser can't find " + memberType + " " + memberName;
-        for (RubyParser.WarningListener listener : problemListeners) {
-            listener.error(position, message);
-        }
-        throw new SyntaxException(position, message);
+    return null;
+  }
+  
+  public final T visitFCallNode(FCallNode node) {
+    visitNode(node);
+    String name = node.getName().to_s().asJavaString();
+    RubyPlugin.log(": " + name, getClass());
+    Member parent = currentMember.getLast();
+    
+    if (parent instanceof Root ||
+      parent instanceof ClassMember ||
+    parent instanceof Module ||
+    (isRspecMethodName(parent.getName()) && isRspecMethodName(name)) ||
+    (isRakeMethodName(parent.getName()) && isRakeMethodName(name)) ) {
+    MethodCallWithSelfAsAnImplicitReceiver call = new MethodCallWithSelfAsAnImplicitReceiver(name);
+    call.setStartOuterOffset(getStartOffset(node.getPosition(), call));
+    call.setStartOffset(call.getStartOuterOffset() + name.length() + 1);
+    call.setEndOffset(getEndOffset(node.getPosition()));
+    
+    parent.addChildMember(call);
+    currentMember.add(call);
+    methodCall = call;
+    if (node.getArgsNode() != null) {
+      node.getArgsNode().accept(this);
     }
-
-    public Instruction visitRootNode(RootNode node) {
-        visitNode(node);
-        RubyPlugin.log("",getClass());
-        if (node.getBodyNode() != null) {
-            node.getBodyNode().accept(this);
-        }
-        return null;
+    if (node.getIterNode() != null) {
+      node.getIterNode().accept(this);
     }
-
-    public final Instruction visitIfNode(IfNode node) {
-        visitNode(node);
-        if (node.getThenBody() != null) {
-            inIfNode = true;
-            node.getThenBody().accept(this);
-            inIfNode = false;
-        }
-        return null;
+    methodCall = null;
+    currentMember.removeLast();
     }
-
-    public final Instruction visitIterNode(IterNode node) {
-        visitNode(node);
-        RubyPlugin.log("", getClass());
-        if (node.getBodyNode() != null) {
-            node.getBodyNode().accept(this);
-        }
-        return null;
+    return null;
+  }
+  
+  private boolean isRakeMethodName(String name) {
+    // ignore 'desc' as always next to something else
+    return name.equals("directory") ||
+    name.equals("file") ||
+    name.equals("file_create") ||
+    name.equals("import") ||
+    name.equals("multitask") ||
+    name.equals("namespace") ||
+    name.equals("rule") ||
+    name.equals("task");
+  }
+  
+  private boolean isRspecMethodName(String name) {
+    return name.equals("describe") ||
+    name.equals("it") ||
+    name.equals("before") ||
+    name.equals("after") ||
+    name.equals("shared_examples_for") ||
+    name.equals("it_should_behave_like") ||
+    name.equals("fixtures") ||
+    name.equals("context") ||
+    name.equals("controller_name") ||
+    name.equals("integrate_views");
+  }
+  
+  public final T visitClassVarDeclNode(ClassVarDeclNode node) {
+    visitNode(node);
+    RubyPlugin.log(": " + node.getName().to_s().asJavaString(), getClass());
+    return null;
+  }
+  
+  public final T visitClassVarAsgnNode(ClassVarAsgnNode node) {
+    visitNode(node);
+    RubyPlugin.log(": " + node.getName().to_s().asJavaString(), getClass());
+    return null;
+  }
+  
+  private int getStartOffset(ISourcePosition position, Member member) {
+    if (inIfNode ||
+      underModuleNode ||
+    (member instanceof Method && currentMember.getLast() == root) ||
+    (member instanceof Method && !member.getName().equals(member.getFullName())) ) {
+    int startOffset = getStartOffset(position);
+    int index = lineCounter.getLineAtOffset(startOffset);
+    String line = lineCounter.getLine(index);
+    int offset = line.indexOf(member.getShortName());
+    if (offset != -1) {
+      return offset + lineCounter.getStartOffset(index);
+    } else {
+      return getStartOffset(position);
     }
-
-    public Instruction visitArrayNode(ArrayNode node) {
-        if (isMethodCall()) {
-            for (int i = 0; i < node.size(); i++) {
-                node.get(i).accept(this);
-            }   
-        }
-        return null;
+    } else {
+      return getStartOffset(position);
     }
-
-    private boolean isMethodCall() {
-        return methodCall != null;
+  }
+  
+  private int getOuterOffset(Member member, String keyword) {
+    int startOffset = member.getStartOffset();
+    int index = lineCounter.getLineAtOffset(startOffset);
+    String line = lineCounter.getLineUpTo(index, startOffset);
+    return line.lastIndexOf(keyword) + lineCounter.getStartOffset(index);
+  }
+  
+  // private int getEndOffset(ISourcePosition position) {
+  // // int end = position.getEndOffset();
+  // // if (lineCounter.charAt(end - 3) == 'e'
+  // // && lineCounter.charAt(end - 2) == 'n'
+  // // && lineCounter.charAt(end - 1) == 'd') {
+  // // return end;
+  // // }
+  // // if (lineCounter.charAt(end - 4) == 'e'
+  // // && lineCounter.charAt(end - 3) == 'n'
+  // // && lineCounter.charAt(end - 2) == 'd') {
+  // // return end - 1;
+  // // }
+  // // 
+  // // char endChar = lineCounter.charAt(end);
+  // // if (((int)endChar) != 65535) {
+  // // switch (endChar) {
+  // // case 'd': return end + 1;
+  // // case 'n': return end + 2;
+  // // case 'e': return end + 3;
+  // // }
+  // // int endLine = position.getEndLine();
+  // // String line = lineCounter.getLine(endLine);
+  // // int start = lineCounter.getStartOffset(endLine);
+  // // int beginIndex = end - start;
+  // // String text = line.substring(beginIndex);
+  // // if (text.indexOf("end") != -1) {
+  // // return text.indexOf("end") + 3 + beginIndex;
+  // // } else {
+  // // return position.getEndOffset();
+  // // }
+  // // } else {
+  // // return position.getEndOffset();
+  // // }
+  // return 0;
+  // }
+  
+  private int getStartOffset(ISourcePosition position) {
+    Buffer buffer = jEdit.getActiveView().getBuffer();
+    int line = position.getLine();
+    return buffer.getLineStartOffset(line);
+  }
+  
+  private int getEndOffset(ISourcePosition position) {
+    Buffer buffer = jEdit.getActiveView().getBuffer();
+    int line = position.getLine();
+    
+    if (position instanceof ClassNode) {
+      line = ((ClassNode)position).getEndLine();
     }
-
-    public Instruction visitConstNode(ConstNode node) {
-        if (isMethodCall()) {
-            methodCall.addArgument(node.getName());
-        }
-        return null;
+    if (position instanceof DefNode) {
+      line =  ((DefNode)position).getEndLine();
     }
-
-    public Instruction visitSymbolNode(SymbolNode node) {
-        if (isMethodCall()) {
-            methodCall.addArgument(":" + node.getName());
-        }
-        return null;
+    
+    if (position instanceof     IterNode) {
+      line =  ((IterNode)position).getEndLine();
     }
-
-    public Instruction visitStrNode(StrNode node) {
-        if (isMethodCall()) {
-            methodCall.addArgument("'" + node.getValue().toString() + "'");
-        }
-        return null;
+    
+    if (position instanceof     MethodDefNode) {
+      line =  ((MethodDefNode)position).getEndLine();
     }
-
-    public Instruction visitHashNode(HashNode node) {
-        if (isMethodCall()) {
-            node.getListNode().accept(this);
-        }
-        return null;
+    
+    if (position instanceof     ModuleNode) {
+      line =  ((ModuleNode)position).getEndLine();
     }
-
-    public final Instruction visitFCallNode(FCallNode node) {
-        visitNode(node);
-        String name = node.getName();
-        RubyPlugin.log(": " + name, getClass());
-        Member parent = currentMember.getLast();
-
-        if (parent instanceof Root ||
-                parent instanceof ClassMember ||
-                parent instanceof Module ||
-                (isRspecMethodName(parent.getName()) && isRspecMethodName(name)) ||
-                (isRakeMethodName(parent.getName()) && isRakeMethodName(name)) ) {
-            MethodCallWithSelfAsAnImplicitReceiver call = new MethodCallWithSelfAsAnImplicitReceiver(name);
-            call.setStartOuterOffset(getStartOffset(node.getPosition(), call));
-            call.setStartOffset(call.getStartOuterOffset() + name.length() + 1);
-            call.setEndOffset(getEndOffset(node.getPosition()));
-
-            parent.addChildMember(call);
-            currentMember.add(call);
-            methodCall = call;
-            if (node.getArgsNode() != null) {
-                node.getArgsNode().accept(this);
-            }
-            if (node.getIterNode() != null) {
-                node.getIterNode().accept(this);
-            }
-            methodCall = null;
-            currentMember.removeLast();
-        }
-        return null;
+    
+    if (position instanceof     SClassNode ) {
+      line =  ((SClassNode )position).getEndLine();
     }
-
-    private boolean isRakeMethodName(String name) {
-        // ignore 'desc' as always next to something else
-        return name.equals("directory") ||
-                name.equals("file") ||
-                name.equals("file_create") ||
-                name.equals("import") ||
-                name.equals("multitask") ||
-                name.equals("namespace") ||
-                name.equals("rule") ||
-                name.equals("task");
+    
+    return buffer.getLineEndOffset(line);
+  }
+  
+  private static final class IndexAdjustmentException extends Exception {
+    private final int index;
+    
+    public IndexAdjustmentException(int index) {
+      this.index = index;
     }
-
-    private boolean isRspecMethodName(String name) {
-        return name.equals("describe") ||
-                name.equals("it") ||
-                name.equals("before") ||
-                name.equals("after") ||
-                name.equals("shared_examples_for") ||
-                name.equals("it_should_behave_like") ||
-                name.equals("fixtures") ||
-                name.equals("context") ||
-                name.equals("controller_name") ||
-                name.equals("integrate_views");
+    
+    public final int getIndex() {
+      return index;
     }
-
-    public final Instruction visitClassVarDeclNode(ClassVarDeclNode node) {
-        visitNode(node);
-        RubyPlugin.log(": " + node.getName(), getClass());
-        return null;
+  }
+  
+  private static final class NameVisitor<T> extends AbstractNodeVisitor<T> {
+    private final List<String> namespaces;
+    private String name;
+    private int visits;
+    
+    public NameVisitor() {
+      namespaces = new ArrayList<String>();
+      visits = 0;
     }
-
-    public final Instruction visitClassVarAsgnNode(ClassVarAsgnNode node) {
-        visitNode(node);
-        RubyPlugin.log(": " + node.getName(), getClass());
-        return null;
+    
+    @Override
+    protected T defaultVisit(Node node) {      
+      List list = node.childNodes();
+      Iterator<Node> it = list.iterator();
+      while(it.hasNext()) {
+        it.next().accept(this);
+        // System.out.println(it.next());
+      }
+      
+      return null;
     }
-
-    private int getStartOffset(ISourcePosition position, Member member) {
-        if (inIfNode ||
-                underModuleNode ||
-                (member instanceof Method && currentMember.getLast() == root) ||
-                (member instanceof Method && !member.getName().equals(member.getFullName())) ) {
-            int startOffset = position.getStartOffset();
-            int index = lineCounter.getLineAtOffset(startOffset);
-            String line = lineCounter.getLine(index);
-            int offset = line.indexOf(member.getShortName());
-            if (offset != -1) {
-                return offset + lineCounter.getStartOffset(index);
-            } else {
-                return position.getStartOffset();
-            }
-        } else {
-            return position.getStartOffset();
-        }
+    
+    protected final T visitNode(Node node) {
+      return null;
     }
-
-    private int getOuterOffset(Member member, String keyword) {
-        int startOffset = member.getStartOffset();
-        int index = lineCounter.getLineAtOffset(startOffset);
-        String line = lineCounter.getLineUpTo(index, startOffset);
-        return line.lastIndexOf(keyword) + lineCounter.getStartOffset(index);
+    @Override 
+    public T visitColon2Node(Colon2Node node) {
+      visits++;
+      if (node.getLeftNode() != null) {
+        node.getLeftNode().accept(this);
+      }
+      visits--;
+      
+      if (visits == 0) {
+        name = node.getName().to_s().asJavaString();
+      } else {
+        namespaces.add(node.getName().to_s().asJavaString());
+      }
+      return null;
     }
-
-    private int getEndOffset(ISourcePosition position) {
-        int end = position.getEndOffset();
-        if (lineCounter.charAt(end - 3) == 'e'
-                && lineCounter.charAt(end - 2) == 'n'
-                && lineCounter.charAt(end - 1) == 'd') {
-            return end;
-        }
-        if (lineCounter.charAt(end - 4) == 'e'
-                && lineCounter.charAt(end - 3) == 'n'
-                && lineCounter.charAt(end - 2) == 'd') {
-            return end - 1;
-        }
-
-        char endChar = lineCounter.charAt(end);
-        if (((int)endChar) != 65535) {
-            switch (endChar) {
-                case 'd': return end + 1;
-                case 'n': return end + 2;
-                case 'e': return end + 3;
-            }
-            int endLine = position.getEndLine();
-            String line = lineCounter.getLine(endLine);
-            int start = lineCounter.getStartOffset(endLine);
-            int beginIndex = end - start;
-            String text = line.substring(beginIndex);
-            if (text.indexOf("end") != -1) {
-                return text.indexOf("end") + 3 + beginIndex;
-            } else {
-                return position.getEndOffset();
-            }
-        } else {
-            return position.getEndOffset();
-        }
+    
+    public T visitConstNode(ConstNode node) {
+      if (visits == 0) {
+        name = node.getName().to_s().asJavaString();
+      } else {
+        namespaces.add(node.getName().to_s().asJavaString());
+      }
+      return null;
     }
-
-    private static final class IndexAdjustmentException extends Exception {
-        private final int index;
-
-        public IndexAdjustmentException(int index) {
-            this.index = index;
-        }
-
-        public final int getIndex() {
-            return index;
-        }
-    }
-
-    private static final class NameVisitor extends AbstractVisitor {
-        private final List<String> namespaces;
-        private String name;
-        private int visits;
-
-        public NameVisitor() {
-            namespaces = new ArrayList<String>();
-            visits = 0;
-        }
-
-        protected final Instruction visitNode(Node node) {
-            return null;
-        }
-
-        public final Instruction visitColon2Node(Colon2Node node) {
-            visits++;
-            if (node.getLeftNode() != null) {
-                node.getLeftNode().accept(this);
-            }
-            visits--;
-
-            if (visits == 0) {
-                name = node.getName();
-            } else {
-                namespaces.add(node.getName());
-            }
-            return null;
-        }
-
-        public Instruction visitConstNode(ConstNode node) {
-            if (visits == 0) {
-                name = node.getName();
-            } else {
-                namespaces.add(node.getName());
-            }
-            return null;
-        }
-    }
+  }
 }

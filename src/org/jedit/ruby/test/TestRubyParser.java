@@ -29,6 +29,8 @@ import org.jedit.ruby.ast.RubyMembers;
 import org.jedit.ruby.ast.ClassMember;
 import org.jedit.ruby.ast.MethodCallWithSelfAsAnImplicitReceiver;
 import org.jruby.lexer.yacc.ISourcePosition;
+import org.jruby.Ruby;
+import org.jruby.common.*;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -680,23 +682,64 @@ public final class TestRubyParser extends TestCase {
     }
 
     private static final class TestListener implements RubyParser.WarningListener {
-//        public final void warn(SourcePosition position, String message) {
-        public void warn(ISourcePosition position, String message) {
+      //        public final void warn(SourcePosition position, String message) {
+        // public void warn(ISourcePosition position, String message) {
+            // RubyPlugin.log(message, getClass());
+        // }
+        @Override
+        public Ruby getRuntime() {
+          return Ruby.getGlobalRuntime();
+        }
+        
+        // @Override
+        // public final void warn(String message) {
+            // RubyPlugin.log(message, getClass());
+        // }
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, ISourcePosition position, String message) {
             RubyPlugin.log(message, getClass());
         }
-
-        public final void warn(String message) {
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, String fileName, int lineNumber, String message) {
+            RubyPlugin.log(message, getClass());
+        }
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, String fileName, String message) {
+            RubyPlugin.log(message, getClass());
+        }
+        
+        @Override
+        public final void warn(IRubyWarnings.ID id, String message) {
+            RubyPlugin.log(message, getClass());
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, String message) {
+            RubyPlugin.log(message, getClass());
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, String fileName, int lineNumber, String message) {
+            RubyPlugin.log(message, getClass());
+        }
+        
+        @Override
+        public final void warning(IRubyWarnings.ID id, ISourcePosition position, String message) {
             RubyPlugin.log(message, getClass());
         }
 
 //        public final void warning(SourcePosition position, String message) {
-        public final void warning(ISourcePosition position, String message) {
-            RubyPlugin.log(message, getClass());
-        }
-
-        public final void warning(String message) {
-            RubyPlugin.log(message, getClass());
-        }
+        // public final void warning(ISourcePosition position, String message) {
+            // RubyPlugin.log(message, getClass());
+        // }
+        
+        // @Override
+        // public final void warning(String message) {
+            // RubyPlugin.log(message, getClass());
+        // }
 
 //        public final void error(SourcePosition position, String message) {
         public final void error(ISourcePosition position, String message) {
