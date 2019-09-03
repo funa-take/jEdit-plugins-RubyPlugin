@@ -79,7 +79,11 @@ final class RubyNodeVisitor<T> extends AbstractNodeVisitor<T> {
     List list = node.childNodes();
     Iterator<Node> it = list.iterator();
     while(it.hasNext()) {
-      it.next().accept(this);
+      Node nextNode = it.next();
+      if (nextNode == null) {
+        continue;
+      }
+      nextNode.accept(this);
       // System.out.println(it.next());
     }
     
