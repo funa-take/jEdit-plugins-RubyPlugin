@@ -83,8 +83,11 @@ public final class JRubyParser {
       RubyWarnings warning = new RubyWarnings(runtime);
       
       RubyIO io = new RubyIO(runtime, is);
-      LexerSource lexerSource = new GetsLexerSource(filePath, 0, io, source);
+      GetsLexerSource lexerSource = new GetsLexerSource(filePath, 0, io, source);
+      lexerSource.setEncoding(org.jcodings.specific.UTF8Encoding.INSTANCE);
+      
       ParserConfiguration config = new ParserConfiguration(runtime, 0, false, false, false);
+      config.setDefaultEncoding(org.jcodings.specific.UTF8Encoding.INSTANCE);
       
       org.jruby.parser.RubyParser parser = new org.jruby.parser.RubyParser(lexerSource, warning);
       RubyParserResult result = parser.parse(config);
