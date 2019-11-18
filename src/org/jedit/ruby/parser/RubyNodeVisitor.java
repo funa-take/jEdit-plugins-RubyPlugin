@@ -417,7 +417,14 @@ final class RubyNodeVisitor<T> extends AbstractNodeVisitor<T> {
   
   public T visitStrNode(StrNode node) {
     if (isMethodCall()) {
-      methodCall.addArgument("'" + node.getValue().toString() + "'");
+      // methodCall.addArgument("'" + node.getValue().toString() + "'");
+      String value = "";
+      try {
+        value = new String(node.getValue().bytes(), "UTF-8");
+      } catch (Exception e) {
+        value = node.getValue().toString();
+      }
+      methodCall.addArgument("'" + value + "'");
     }
     return null;
   }
